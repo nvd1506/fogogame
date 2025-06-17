@@ -1,0 +1,995 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fireboy Mini 2</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            font-family: 'Arial', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            color: white;
+        }
+        
+        .game-container {
+            background: #0f1419;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            border: 2px solid #ff6b35;
+        }
+        
+        .game-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding: 10px 20px;
+            background: rgba(255,107,53,0.1);
+            border-radius: 10px;
+            border: 1px solid #ff6b35;
+        }
+        
+        .stat {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: bold;
+            font-size: 16px;
+        }
+        
+        .hearts {
+            display: flex;
+            gap: 5px;
+        }
+        
+        .heart {
+            color: #ff4757;
+            font-size: 20px;
+        }
+        
+        .timer {
+            color: #ff6b35;
+            font-size: 18px;
+            font-weight: bold;
+        }
+        
+        .crystals {
+            color: #3742fa;
+            font-weight: bold;
+        }
+        
+        canvas {
+            border: 3px solid #ff6b35;
+            border-radius: 10px;
+            background: linear-gradient(180deg, #87ceeb 0%, #98fb98 100%);
+            display: block;
+        }
+        
+        .controls {
+            margin-top: 15px;
+            text-align: center;
+            color: #ccc;
+            font-size: 14px;
+        }
+        
+        .game-over, .level-complete {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.9);
+            color: white;
+            padding: 30px;
+            border-radius: 15px;
+            text-align: center;
+            border: 2px solid #ff6b35;
+            display: none;
+        }
+        
+        .restart-btn {
+            background: #ff6b35;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 15px;
+            transition: background 0.3s;
+        }
+        
+        .restart-btn:hover {
+            background: #e55039;
+        }
+        
+        h1 {
+            text-align: center;
+            color: #ff6b35;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            margin-bottom: 20px;
+            font-size: 2.5em;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔥 Fireboy Mini 🔥</h1>
+    
+    <div class="game-container">
+        <div class="game-header">
+            <div class="stat">
+                <span>Lives:</span>
+                <div class="hearts" id="hearts"></div>
+            </div>
+            <div class="stat">
+                <span>Round:</span>
+                <span id="round">1</span>
+            </div>
+            <div class="stat timer">
+                <span>Time:</span>
+                <span id="timer">60</span>s
+            </div>
+            <div class="stat crystals">
+                <span>Crystals:</span>
+                <span id="crystals">0/3</span>
+            </div>
+        </div>
+        
+        <canvas id="gameCanvas" width="800" height="400"></canvas>
+        
+        <div class="controls">
+            Use WASD or Arrow Keys to move and jump • Spacebar for fire burst • Avoid water! • Burn wooden boxes! • Collect all crystals!
+        </div>
+    </div>
+    
+    <div class="game-over" id="gameOver">
+        <h2>Game Over!</h2>
+        <p id="gameOverMsg">You ran out of lives!</p>
+        <button class="restart-btn" onclick="restartGame()">Try Again</button>
+    </div>
+    
+    <div class="level-complete" id="levelComplete">
+        <h2>Level Complete!</h2>
+        <p id="completionMsg">Great job!</p>
+        <button class="restart-btn" onclick="nextRound()">Next Round</button>
+    </div>
+
+    <script>
+        // Game Canvas and Context
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Game State
+        let gameState = {
+            lives: 5,
+            round: 1,
+            timeLeft: 60,
+            crystalsCollected: 0,
+            totalCrystals: 3,
+            gameRunning: true,
+            levelComplete: false
+        };
+        
+        // Game Timer
+        let gameTimer;
+        
+        // Input Handling
+        const keys = {};
+        
+        // Player Object
+        const player = {
+            x: 50,
+            y: 300,
+            width: 30,
+            height: 30,
+            velocityX: 0,
+            velocityY: 0,
+            speed: 5,
+            jumpPower: 12,
+            onGround: false,
+            fireAnimation: 0
+        };
+        
+        // Game Objects
+        let platforms = [];
+        let waterPools = [];
+        let woodenBoxes = [];
+        let crystals = [];
+        let exitDoor = {};
+        let particles = [];
+        
+        // Sound System
+        const sounds = {
+            jump: null,
+            burn: null,
+            crystal: null,
+            death: null,
+            complete: null
+        };
+        
+        // Initialize sounds
+        function initSounds() {
+            try {
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                
+                sounds.jump = () => playTone(audioContext, 220, 0.1, 'sine');
+                sounds.burn = () => playTone(audioContext, 150, 0.3, 'sawtooth');
+                sounds.crystal = () => playTone(audioContext, 440, 0.2, 'sine');
+                sounds.death = () => playTone(audioContext, 100, 0.5, 'square');
+                sounds.complete = () => playChord(audioContext, [262, 330, 392], 0.8);
+            } catch (e) {
+                // Fallback if audio context fails
+                console.log('Audio not available');
+                sounds.jump = () => {};
+                sounds.burn = () => {};
+                sounds.crystal = () => {};
+                sounds.death = () => {};
+                sounds.complete = () => {};
+            }
+        }
+        
+        function playTone(audioContext, frequency, duration, type = 'sine') {
+            try {
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+                
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                
+                oscillator.frequency.value = frequency;
+                oscillator.type = type;
+                
+                gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+                
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + duration);
+            } catch (e) {
+                // Silent fallback
+            }
+        }
+        
+        function playChord(audioContext, frequencies, duration) {
+            frequencies.forEach((freq, index) => {
+                setTimeout(() => playTone(audioContext, freq, duration * 0.6, 'sine'), index * 100);
+            });
+        }
+        
+        // Initialize Game
+        function initGame() {
+            initSounds();
+            setupLevel();
+            startTimer();
+            gameLoop();
+        }
+        
+        function setupLevel() {
+            // Reset collections
+            platforms = [];
+            waterPools = [];
+            woodenBoxes = [];
+            crystals = [];
+            particles = [];
+            
+            // Base difficulty increases with rounds
+            const difficulty = gameState.round;
+            
+            // More dynamic platforms based on round
+            platforms = [
+                {x: 0, y: 380, width: 800, height: 20}, // Ground
+            ];
+            
+            // Generate random platform layouts for each round
+            const platformLayouts = [
+                // Round 1 layout
+                [
+                    {x: 150, y: 320, width: 100, height: 20},
+                    {x: 300, y: 260, width: 120, height: 20},
+                    {x: 500, y: 200, width: 100, height: 20},
+                    {x: 650, y: 140, width: 100, height: 20}
+                ],
+                // Round 2 layout
+                [
+                    {x: 120, y: 300, width: 80, height: 20},
+                    {x: 250, y: 240, width: 100, height: 20},
+                    {x: 400, y: 180, width: 90, height: 20},
+                    {x: 550, y: 120, width: 110, height: 20},
+                    {x: 700, y: 180, width: 80, height: 20}
+                ],
+                // Round 3+ layout
+                [
+                    {x: 100, y: 340, width: 70, height: 20},
+                    {x: 200, y: 280, width: 80, height: 20},
+                    {x: 320, y: 220, width: 70, height: 20},
+                    {x: 430, y: 160, width: 90, height: 20},
+                    {x: 560, y: 100, width: 80, height: 20},
+                    {x: 680, y: 160, width: 70, height: 20},
+                    {x: 180, y: 160, width: 60, height: 20}
+                ]
+            ];
+            
+            const layoutIndex = Math.min(difficulty - 1, platformLayouts.length - 1);
+            platforms.push(...platformLayouts[layoutIndex]);
+            
+            // Dynamic water pools with different positions each round
+            waterPools = [];
+            const waterLayouts = [
+                // Round 1
+                [{x: 250, y: 360, width: 50, height: 20}],
+                // Round 2
+                [
+                    {x: 180, y: 360, width: 40, height: 20},
+                    {x: 370, y: 360, width: 30, height: 20},
+                    {x: 290, y: 220, width: 30, height: 20}
+                ],
+                // Round 3+
+                [
+                    {x: 170, y: 360, width: 30, height: 20},
+                    {x: 290, y: 360, width: 35, height: 20},
+                    {x: 410, y: 360, width: 40, height: 20},
+                    {x: 350, y: 200, width: 25, height: 20},
+                    {x: 520, y: 360, width: 30, height: 20}
+                ]
+            ];
+            
+            const waterLayoutIndex = Math.min(difficulty - 1, waterLayouts.length - 1);
+            waterPools.push(...waterLayouts[waterLayoutIndex]);
+            
+            // Moving Wooden Boxes with different patterns each round
+            woodenBoxes = [];
+            const boxConfigs = [
+                // Round 1 - Simple horizontal movement
+                [
+                    {x: 170, y: 290, width: 30, height: 30, burned: false, 
+                     moveType: 'horizontal', speed: 1, range: 60, startX: 170, startY: 290},
+                    {x: 320, y: 230, width: 30, height: 30, burned: false, 
+                     moveType: 'horizontal', speed: -1.5, range: 80, startX: 320, startY: 230},
+                    {x: 520, y: 170, width: 30, height: 30, burned: false, 
+                     moveType: 'vertical', speed: 1, range: 40, startX: 520, startY: 170}
+                ],
+                // Round 2 - Mixed movement patterns
+                [
+                    {x: 140, y: 270, width: 30, height: 30, burned: false, 
+                     moveType: 'horizontal', speed: 2, range: 50, startX: 140, startY: 270},
+                    {x: 270, y: 210, width: 30, height: 30, burned: false, 
+                     moveType: 'circle', speed: 0.02, range: 25, startX: 270, startY: 210},
+                    {x: 420, y: 130, width: 30, height: 30, burned: false, 
+                     moveType: 'vertical', speed: -1.5, range: 50, startX: 420, startY: 130},
+                    {x: 570, y: 70, width: 30, height: 30, burned: false, 
+                     moveType: 'horizontal', speed: -2, range: 70, startX: 570, startY: 70}
+                ],
+                // Round 3+ - Complex patterns
+                [
+                    {x: 120, y: 310, width: 30, height: 30, burned: false, 
+                     moveType: 'horizontal', speed: 2.5, range: 40, startX: 120, startY: 310},
+                    {x: 220, y: 250, width: 30, height: 30, burned: false, 
+                     moveType: 'circle', speed: 0.03, range: 30, startX: 220, startY: 250},
+                    {x: 340, y: 190, width: 30, height: 30, burned: false, 
+                     moveType: 'diagonal', speed: 1.5, range: 35, startX: 340, startY: 190},
+                    {x: 450, y: 130, width: 30, height: 30, burned: false, 
+                     moveType: 'vertical', speed: -2, range: 45, startX: 450, startY: 130},
+                    {x: 580, y: 70, width: 30, height: 30, burned: false, 
+                     moveType: 'horizontal', speed: -3, range: 60, startX: 580, startY: 70},
+                    {x: 200, y: 130, width: 30, height: 30, burned: false, 
+                     moveType: 'circle', speed: -0.025, range: 20, startX: 200, startY: 130}
+                ]
+            ];
+            
+            const boxConfigIndex = Math.min(difficulty - 1, boxConfigs.length - 1);
+            woodenBoxes.push(...boxConfigs[boxConfigIndex]);
+            
+            // Add movement time offset for each box
+            woodenBoxes.forEach((box, index) => {
+                box.timeOffset = index * 1000; // Different starting points in animation
+            });
+            
+            // Dynamic crystal positions
+            crystals = [];
+            const crystalLayouts = [
+                // Round 1
+                [
+                    {x: 180, y: 280, width: 20, height: 20, collected: false},
+                    {x: 330, y: 220, width: 20, height: 20, collected: false},
+                    {x: 670, y: 110, width: 20, height: 20, collected: false}
+                ],
+                // Round 2
+                [
+                    {x: 140, y: 260, width: 20, height: 20, collected: false},
+                    {x: 270, y: 200, width: 20, height: 20, collected: false},
+                    {x: 420, y: 140, width: 20, height: 20, collected: false},
+                    {x: 710, y: 140, width: 20, height: 20, collected: false}
+                ],
+                // Round 3+
+                [
+                    {x: 110, y: 300, width: 20, height: 20, collected: false},
+                    {x: 210, y: 240, width: 20, height: 20, collected: false},
+                    {x: 330, y: 180, width: 20, height: 20, collected: false},
+                    {x: 440, y: 120, width: 20, height: 20, collected: false},
+                    {x: 570, y: 60, width: 20, height: 20, collected: false}
+                ]
+            ];
+            
+            const crystalLayoutIndex = Math.min(difficulty - 1, crystalLayouts.length - 1);
+            crystals.push(...crystalLayouts[crystalLayoutIndex]);
+            
+            // Exit Door - different positions each round
+            const exitPositions = [
+                {x: 720, y: 320, width: 40, height: 60}, // Round 1
+                {x: 710, y: 140, width: 40, height: 60}, // Round 2
+                {x: 690, y: 120, width: 40, height: 60}  // Round 3+
+            ];
+            
+            const exitIndex = Math.min(difficulty - 1, exitPositions.length - 1);
+            exitDoor = {...exitPositions[exitIndex], open: false};
+            
+            // Reset player position
+            player.x = 50;
+            player.y = 300;
+            player.velocityX = 0;
+            player.velocityY = 0;
+            
+            // Reset crystals collected
+            gameState.crystalsCollected = 0;
+            gameState.totalCrystals = crystals.length;
+            gameState.levelComplete = false;
+            
+            // Adjust timer based on difficulty
+            gameState.timeLeft = Math.max(45, 80 - (difficulty * 5));
+            
+            updateUI();
+        }
+        
+        function startTimer() {
+            clearInterval(gameTimer);
+            gameTimer = setInterval(() => {
+                if (gameState.gameRunning && !gameState.levelComplete) {
+                    gameState.timeLeft--;
+                    updateUI();
+                    
+                    if (gameState.timeLeft <= 0) {
+                        loseLife("Time's up!");
+                    }
+                }
+            }, 1000);
+        }
+        
+        function updateUI() {
+            // Update hearts
+            const heartsContainer = document.getElementById('hearts');
+            heartsContainer.innerHTML = '';
+            for (let i = 0; i < gameState.lives; i++) {
+                const heart = document.createElement('span');
+                heart.className = 'heart';
+                heart.textContent = '❤️';
+                heartsContainer.appendChild(heart);
+            }
+            
+            // Update other stats
+            document.getElementById('round').textContent = gameState.round;
+            document.getElementById('timer').textContent = gameState.timeLeft;
+            document.getElementById('crystals').textContent = `${gameState.crystalsCollected}/${gameState.totalCrystals}`;
+        }
+        
+        function loseLife(reason) {
+            sounds.death();
+            gameState.lives--;
+            updateUI();
+            
+            if (gameState.lives <= 0) {
+                gameOver(reason);
+            } else {
+                // Reset player position
+                player.x = 50;
+                player.y = 300;
+                player.velocityX = 0;
+                player.velocityY = 0;
+            }
+        }
+        
+        function gameOver(reason) {
+            gameState.gameRunning = false;
+            clearInterval(gameTimer);
+            document.getElementById('gameOverMsg').textContent = reason;
+            document.getElementById('gameOver').style.display = 'block';
+        }
+        
+        function levelComplete() {
+            sounds.complete();
+            gameState.levelComplete = true;
+            const completionTime = 80 - (gameState.round * 5) - gameState.timeLeft;
+            document.getElementById('completionMsg').textContent = 
+                `Round ${gameState.round} completed in ${completionTime} seconds!`;
+            document.getElementById('levelComplete').style.display = 'block';
+        }
+        
+        function restartGame() {
+            gameState.lives = 5;
+            gameState.round = 1;
+            gameState.gameRunning = true;
+            document.getElementById('gameOver').style.display = 'none';
+            document.getElementById('levelComplete').style.display = 'none';
+            setupLevel();
+            startTimer();
+        }
+        
+        function nextRound() {
+            gameState.round++;
+            gameState.lives = Math.min(5, gameState.lives + 1); // Bonus life each round
+            document.getElementById('levelComplete').style.display = 'none';
+            setupLevel();
+            startTimer();
+        }
+        
+        // Input Event Listeners
+        document.addEventListener('keydown', (e) => {
+            keys[e.code] = true;
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            keys[e.code] = false;
+        });
+        
+        // Game Physics and Logic
+        function updatePlayer() {
+            if (!gameState.gameRunning) return;
+            
+            // Horizontal movement
+            if (keys['KeyA'] || keys['ArrowLeft']) {
+                player.velocityX = -player.speed;
+            } else if (keys['KeyD'] || keys['ArrowRight']) {
+                player.velocityX = player.speed;
+            } else {
+                player.velocityX *= 0.8; // Friction
+            }
+            
+            // Jumping
+            if ((keys['KeyW'] || keys['ArrowUp']) && player.onGround) {
+                player.velocityY = -player.jumpPower;
+                player.onGround = false;
+                sounds.jump();
+            }
+            
+            // Fire burst (spacebar)
+            if (keys['Space']) {
+                createFireParticles(player.x + player.width/2, player.y + player.height/2);
+            }
+            
+            // Apply gravity
+            player.velocityY += 0.6;
+            
+            // Update position
+            player.x += player.velocityX;
+            player.y += player.velocityY;
+            
+            // Keep player in bounds
+            if (player.x < 0) player.x = 0;
+            if (player.x + player.width > canvas.width) player.x = canvas.width - player.width;
+            
+            // Check platform collisions
+            player.onGround = false;
+            for (let platform of platforms) {
+                if (checkCollision(player, platform)) {
+                    if (player.velocityY > 0 && player.y < platform.y) {
+                        player.y = platform.y - player.height;
+                        player.velocityY = 0;
+                        player.onGround = true;
+                    }
+                }
+            }
+            
+            // Check water collision
+            for (let water of waterPools) {
+                if (checkCollision(player, water)) {
+                    loseLife("Fireboy touched water!");
+                    return;
+                }
+            }
+            
+            // Check wooden box collision and burning
+            for (let box of woodenBoxes) {
+                if (!box.burned && checkCollision(player, box)) {
+                    box.burned = true;
+                    sounds.burn();
+                    createBurnEffect(box.x + box.width/2, box.y + box.height/2);
+                }
+            }
+            
+            // Check crystal collection
+            for (let crystal of crystals) {
+                if (!crystal.collected && checkCollision(player, crystal)) {
+                    crystal.collected = true;
+                    gameState.crystalsCollected++;
+                    sounds.crystal();
+                    createCrystalEffect(crystal.x + crystal.width/2, crystal.y + crystal.height/2);
+                    updateUI();
+                    
+                    if (gameState.crystalsCollected >= gameState.totalCrystals) {
+                        exitDoor.open = true;
+                    }
+                }
+            }
+            
+            // Check exit door
+            if (exitDoor.open && checkCollision(player, exitDoor)) {
+                levelComplete();
+            }
+            
+            // Update fire animation
+            player.fireAnimation += 0.2;
+        }
+        
+        function updateWoodenBoxes() {
+            const currentTime = Date.now();
+            
+            for (let box of woodenBoxes) {
+                if (box.burned) continue;
+                
+                const time = (currentTime + box.timeOffset) * 0.001;
+                
+                switch (box.moveType) {
+                    case 'horizontal':
+                        box.x = box.startX + Math.sin(time * box.speed) * box.range;
+                        break;
+                        
+                    case 'vertical':
+                        box.y = box.startY + Math.sin(time * box.speed) * box.range;
+                        break;
+                        
+                    case 'circle':
+                        box.x = box.startX + Math.cos(time * box.speed) * box.range;
+                        box.y = box.startY + Math.sin(time * box.speed) * box.range;
+                        break;
+                        
+                    case 'diagonal':
+                        box.x = box.startX + Math.sin(time * box.speed) * box.range;
+                        box.y = box.startY + Math.cos(time * box.speed * 0.7) * box.range;
+                        break;
+                }
+                
+                // Keep boxes within canvas bounds
+                box.x = Math.max(0, Math.min(canvas.width - box.width, box.x));
+                box.y = Math.max(0, Math.min(canvas.height - box.height, box.y));
+            }
+        }
+        
+        function checkCollision(obj1, obj2) {
+            return obj1.x < obj2.x + obj2.width &&
+                   obj1.x + obj1.width > obj2.x &&
+                   obj1.y < obj2.y + obj2.height &&
+                   obj1.y + obj1.height > obj2.y;
+        }
+        
+        function createFireParticles(x, y) {
+            for (let i = 0; i < 5; i++) {
+                particles.push({
+                    x: x + (Math.random() - 0.5) * 20,
+                    y: y + (Math.random() - 0.5) * 20,
+                    velocityX: (Math.random() - 0.5) * 4,
+                    velocityY: -Math.random() * 3,
+                    life: 20,
+                    type: 'fire'
+                });
+            }
+        }
+        
+        function createBurnEffect(x, y) {
+            for (let i = 0; i < 10; i++) {
+                particles.push({
+                    x: x + (Math.random() - 0.5) * 30,
+                    y: y + (Math.random() - 0.5) * 30,
+                    velocityX: (Math.random() - 0.5) * 3,
+                    velocityY: -Math.random() * 4,
+                    life: 30,
+                    type: 'burn'
+                });
+            }
+        }
+        
+        function createCrystalEffect(x, y) {
+            for (let i = 0; i < 8; i++) {
+                particles.push({
+                    x: x,
+                    y: y,
+                    velocityX: Math.cos(i * Math.PI / 4) * 3,
+                    velocityY: Math.sin(i * Math.PI / 4) * 3,
+                    life: 25,
+                    type: 'crystal'
+                });
+            }
+        }
+        
+        function updateParticles() {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.x += p.velocityX;
+                p.y += p.velocityY;
+                p.life--;
+                
+                if (p.life <= 0) {
+                    particles.splice(i, 1);
+                }
+            }
+        }
+        
+        // Rendering Functions
+        function render() {
+            // Clear canvas
+            ctx.fillStyle = '#87ceeb';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw platforms
+            ctx.fillStyle = '#8B4513';
+            for (let platform of platforms) {
+                ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+                // Add some texture
+                ctx.fillStyle = '#A0522D';
+                ctx.fillRect(platform.x, platform.y, platform.width, 5);
+                ctx.fillStyle = '#8B4513';
+            }
+            
+            // Draw water pools
+            ctx.fillStyle = '#0077be';
+            for (let water of waterPools) {
+                ctx.fillRect(water.x, water.y, water.width, water.height);
+                // Add wave effect
+                ctx.fillStyle = '#00a8e8';
+                ctx.fillRect(water.x, water.y, water.width, 5);
+                ctx.fillStyle = '#0077be';
+            }
+            
+            // Draw flame boxes
+            for (let box of woodenBoxes) {
+                if (!box.burned) {
+                    const centerX = box.x + box.width / 2;
+                    const centerY = box.y + box.height / 2;
+                    const time = Date.now() * 0.005 + box.x * 0.01; // Unique animation per box
+                    
+                    ctx.save();
+                    
+                    // Main flame body (circular base)
+                    const baseRadius = Math.min(box.width, box.height) / 2;
+                    
+                    // Outer flame ring (dark orange/red)
+                    ctx.fillStyle = '#d63031';
+                    ctx.beginPath();
+                    ctx.arc(centerX, centerY + 5, baseRadius + 2, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Middle flame ring (orange)
+                    ctx.fillStyle = '#e17055';
+                    ctx.beginPath();
+                    ctx.arc(centerX, centerY + 3, baseRadius, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Inner flame ring (yellow-orange)
+                    ctx.fillStyle = '#fdcb6e';
+                    ctx.beginPath();
+                    ctx.arc(centerX, centerY + 1, baseRadius - 3, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Core flame (bright yellow)
+                    ctx.fillStyle = '#f1c40f';
+                    ctx.beginPath();
+                    ctx.arc(centerX, centerY - 1, baseRadius - 6, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Animated flame tongues/wisps
+                    for (let i = 0; i < 6; i++) {
+                        const angle = (i / 6) * Math.PI * 2 + time;
+                        const flameHeight = 8 + Math.sin(time * 2 + i) * 4;
+                        const flameWidth = 3 + Math.sin(time * 3 + i) * 1;
+                        
+                        // Flame tongue position
+                        const flameX = centerX + Math.cos(angle) * (baseRadius - 2);
+                        const flameY = centerY - flameHeight / 2;
+                        
+                        // Flame tongue colors (alternating)
+                        const flameColors = ['#e17055', '#fd79a8', '#fdcb6e'];
+                        ctx.fillStyle = flameColors[i % 3];
+                        
+                        // Draw flame tongue shape
+                        ctx.beginPath();
+                        ctx.ellipse(flameX, flameY, flameWidth, flameHeight, angle, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                    
+                    // Additional dancing flames on top
+                    for (let i = 0; i < 4; i++) {
+                        const offsetX = (Math.sin(time * 4 + i) * 8);
+                        const offsetY = (Math.sin(time * 3 + i) * 6) - 12;
+                        const size = 3 + Math.sin(time * 5 + i) * 2;
+                        
+                        ctx.fillStyle = i % 2 === 0 ? '#e17055' : '#fdcb6e';
+                        ctx.beginPath();
+                        ctx.arc(centerX + offsetX, centerY + offsetY, size, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                    
+                    // Glowing effect
+                    ctx.globalCompositeOperation = 'screen';
+                    ctx.fillStyle = 'rgba(253, 203, 110, 0.3)';
+                    ctx.beginPath();
+                    ctx.arc(centerX, centerY, baseRadius + 8, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    ctx.restore();
+                }
+            }
+            
+            // Draw crystals
+            for (let crystal of crystals) {
+                if (!crystal.collected) {
+                    const pulse = Math.sin(Date.now() * 0.01) * 0.2 + 1;
+                    ctx.save();
+                    ctx.translate(crystal.x + crystal.width/2, crystal.y + crystal.height/2);
+                    ctx.scale(pulse, pulse);
+                    ctx.fillStyle = '#3742fa';
+                    ctx.fillRect(-crystal.width/2, -crystal.height/2, crystal.width, crystal.height);
+                    ctx.fillStyle = '#57b8ff';
+                    ctx.fillRect(-crystal.width/2 + 3, -crystal.height/2 + 3, crystal.width - 6, crystal.height - 6);
+                    ctx.restore();
+                }
+            }
+            
+            // Draw exit door
+            if (exitDoor.open) {
+                ctx.fillStyle = '#00ff00';
+            } else {
+                ctx.fillStyle = '#666666';
+            }
+            ctx.fillRect(exitDoor.x, exitDoor.y, exitDoor.width, exitDoor.height);
+            ctx.fillStyle = '#333333';
+            ctx.fillRect(exitDoor.x + 5, exitDoor.y + 10, exitDoor.width - 10, exitDoor.height - 20);
+            
+            // Draw player (Fireboy) - New stylized character
+            const centerX = player.x + player.width / 2;
+            const centerY = player.y + player.height / 2;
+            
+            // Fire aura effect
+            ctx.save();
+            for (let i = 0; i < 3; i++) {
+                const offset = Math.sin(player.fireAnimation + i) * 3;
+                const fireColors = ['#ff4757', '#ff6b35', '#ffa502'];
+                ctx.fillStyle = fireColors[i % fireColors.length];
+                ctx.globalAlpha = 0.4;
+                ctx.beginPath();
+                ctx.arc(centerX + offset, centerY, player.width/2 + 3 + i, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.restore();
+            
+            // Body (black shirt)
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(player.x + 3, player.y + 12, player.width - 6, player.height - 12);
+            
+            // Head (pale skin)
+            ctx.fillStyle = '#f4c2a1';
+            ctx.beginPath();
+            ctx.arc(centerX, player.y + 8, 10, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Spiky hair (gray/silver)
+            ctx.fillStyle = '#c0c0c0';
+            // Hair spikes
+            ctx.beginPath();
+            ctx.moveTo(centerX - 8, player.y + 2);
+            ctx.lineTo(centerX - 12, player.y - 8);
+            ctx.lineTo(centerX - 4, player.y - 2);
+            ctx.lineTo(centerX, player.y - 10);
+            ctx.lineTo(centerX + 4, player.y - 2);
+            ctx.lineTo(centerX + 12, player.y - 8);
+            ctx.lineTo(centerX + 8, player.y + 2);
+            ctx.closePath();
+            ctx.fill();
+            
+            // Hair outline
+            ctx.strokeStyle = '#808080';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            
+            // Sunglasses
+            ctx.fillStyle = '#000000';
+            // Left lens
+            ctx.fillRect(centerX - 8, player.y + 5, 6, 4);
+            // Right lens
+            ctx.fillRect(centerX + 2, player.y + 5, 6, 4);
+            // Bridge
+            ctx.fillRect(centerX - 2, player.y + 6, 4, 2);
+            // Frame highlight
+            ctx.strokeStyle = '#333333';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(centerX - 8, player.y + 5, 6, 4);
+            ctx.strokeRect(centerX + 2, player.y + 5, 6, 4);
+            
+            // Lightning bolt on shirt
+            ctx.fillStyle = '#ffff00';
+            ctx.beginPath();
+            ctx.moveTo(centerX - 2, player.y + 16);
+            ctx.lineTo(centerX + 1, player.y + 16);
+            ctx.lineTo(centerX - 1, player.y + 20);
+            ctx.lineTo(centerX + 3, player.y + 20);
+            ctx.lineTo(centerX, player.y + 26);
+            ctx.lineTo(centerX - 1, player.y + 22);
+            ctx.lineTo(centerX + 1, player.y + 22);
+            ctx.closePath();
+            ctx.fill();
+            
+            // Flame in hand (right side)
+            if (keys['Space'] || Math.sin(player.fireAnimation * 2) > 0.5) {
+                const flameX = centerX + 12;
+                const flameY = player.y + 18;
+                
+                // Flame effect
+                ctx.save();
+                const flameSize = 6 + Math.sin(player.fireAnimation * 3) * 2;
+                
+                // Outer flame (red)
+                ctx.fillStyle = '#ff4757';
+                ctx.beginPath();
+                ctx.arc(flameX, flameY, flameSize, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Middle flame (orange)
+                ctx.fillStyle = '#ff6b35';
+                ctx.beginPath();
+                ctx.arc(flameX, flameY - 1, flameSize * 0.7, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Inner flame (yellow)
+                ctx.fillStyle = '#ffa502';
+                ctx.beginPath();
+                ctx.arc(flameX, flameY - 2, flameSize * 0.4, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.restore();
+            }
+            
+            // Arms
+            ctx.fillStyle = '#f4c2a1';
+            // Left arm
+            ctx.fillRect(player.x - 2, player.y + 14, 5, 8);
+            // Right arm
+            ctx.fillRect(player.x + player.width - 3, player.y + 14, 5, 8);
+            
+            // Legs
+            ctx.fillStyle = '#1a1a1a';
+            // Left leg
+            ctx.fillRect(player.x + 6, player.y + player.height - 8, 6, 8);
+            // Right leg  
+            ctx.fillRect(player.x + player.width - 12, player.y + player.height - 8, 6, 8);
+            
+            // Draw particles
+            for (let p of particles) {
+                ctx.globalAlpha = p.life / 30;
+                if (p.type === 'fire') {
+                    ctx.fillStyle = '#ff6b35';
+                } else if (p.type === 'burn') {
+                    ctx.fillStyle = '#ff4757';
+                } else if (p.type === 'crystal') {
+                    ctx.fillStyle = '#3742fa';
+                }
+                ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+            }
+            ctx.globalAlpha = 1;
+        }
+        
+        // Game Loop
+        function gameLoop() {
+            updatePlayer();
+            updateWoodenBoxes();
+            updateParticles();
+            render();
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Start the game
+        initGame();
+    </script>
+</body>
+</html>
